@@ -295,7 +295,7 @@ const ranges = ns => ns.reduce((a, n) => {
 }, []).map(([a, b]) => a === b ? a : `${a}–${b}`).join(', ');
 
 // ---------- Collection : séries (2 tomes ou plus) et livres seuls ----------
-const coll = { tab: 'series', q: '', st: 'active', sort: 'date', t: '', m: '', r: '', soloSort: 'date', open: new Set() };
+const coll = { tab: 'series', q: '', st: 'active', sort: 'date', t: '', m: '', r: '', soloSort: 'date', aSort: 'title', open: new Set() };
 const lastDate = bs => bs.flatMap(b => loansOf(b.id).map(l => l.date)).sort().at(-1) || '';
 const matchQ = (text, q) => { const t = norm(text); return norm(q).split(' ').filter(Boolean).every(w => t.includes(w)); };
 
@@ -363,6 +363,34 @@ function seriesCard(g) {
     </div></div>`;
 }
 
+// Auteurs : « SOBRAL Patrick », « Sobral Patrick » et « Patrick Sobral » = même clé (mots triés)
+const splitAuthors = s => String(s ?? '').split(/\s*[,;&]\s*|\s+et\s+/).map(a => a.trim()).filter(Boolean);
+const authorKey = a => norm(a).split(' ').sort().join(' ');
+const prettyName = a => a.replace(/\p{Lu}{2,}/gu, w => w[0] + w.slice(1).toLowerCase()); // SOBRAL → Sobral
+
+function authorGroups() {
+  const groups = {};
+  for (const b of books()) for (const a of splitAuthors(b.author)) {
+    const g = (groups[authorKey(a)] ||= { k: 'a:' + authorKey(a), names: {}, books: [] });
+    g.names[a] = (g.names[a] || 0) + 1;
+    if (!g.books.includes(b)) g.books.push(b);
+  }
+  return Object.values(groups).map(g => ({ ...g, last: lastDate(g.books),
+    name: prettyName(Object.keys(g.names).sort((x, y) => g.names[y] - g.names[x])[0]) }));
+}
+
+function authorCard(g) {
+  const open = coll.open.has(g.k);
+  const series = [...new Set(g.books.map(b => b.series).filter(Boolean))];
+  return `<div class="card acard"><div class="info">
+      <div class="shead" data-act="toggle" data-k="${esc(g.k)}">
+        <span class="series">✍️ ${esc(g.name)}</span><small>${g.books.length} · ${fmt(g.last)} ${open ? '▴' : '▾'}</small>
+      </div>
+      ${series.length ? `<small>Séries : ${series.slice(0, 6).map(esc).join(', ')}${series.length > 6 ? '…' : ''}</small>` : ''}
+      ${open ? `<div class="tomes">${[...g.books].sort(bySeries).map(soloRow).join('')}</div>` : ''}
+    </div></div>`;
+}
+
 function soloRow(b) {
   const ls = loansOf(b.id), key = 'b:' + b.id;
   if (coll.open.has(key)) return `<div class="solo-open">${bookCard(b)}<button class="chip" data-act="toggle" data-k="${key}">▴ Réduire</button></div>`;
@@ -377,12 +405,15 @@ function renderSeries() {
   const el = $('#v-series');
   if (!$('#coll-q')) el.innerHTML = `
     <div class="subtabs">
-      <button data-act="ctab" data-v="series">📚 Séries</button><button data-act="ctab" data-v="solo">📖 Livres seuls</button>
+      <button data-act="ctab" data-v="series">📚 Séries</button><button data-act="ctab" data-v="solo">📖 Livres seuls</button><button data-act="ctab" data-v="authors">✍️ Auteurs</button>
     </div>
     <input id="coll-q" type="search" placeholder="🔎 Filtrer…" autocomplete="off">
     <div class="row filters" id="coll-f-series">
       <select data-c="st">${opts({ active: 'En cours', finished: '🏁 Terminées', dropped: '✋ Abandonnées', all: 'Toutes' }, coll.st)}</select>
       <select data-c="sort">${opts({ date: 'Tri : dernier emprunt', title: 'Tri : A → Z' }, coll.sort)}</select>
+    </div>
+    <div class="row filters" id="coll-f-authors">
+      <select data-c="aSort">${opts({ title: 'Tri : A → Z', date: 'Tri : dernier emprunt', count: 'Tri : nombre de livres' }, coll.aSort)}</select>
     </div>
     <div id="coll-f-solo">
       <div class="row filters">
@@ -398,6 +429,7 @@ function renderSeries() {
   for (const b of el.querySelectorAll('.subtabs button')) b.classList.toggle('on', b.dataset.v === coll.tab);
   $('#coll-f-series').hidden = coll.tab !== 'series';
   $('#coll-f-solo').hidden = coll.tab !== 'solo';
+  $('#coll-f-authors').hidden = coll.tab !== 'authors';
   renderCollBody();
 }
 
@@ -411,6 +443,13 @@ function renderCollBody() {
       .sort((a, b) => coll.sort === 'title' ? byTitle(a.name, b.name) : b.last.localeCompare(a.last));
     body.innerHTML = `<p class="muted">${list.length} série(s)</p>` + (list.map(seriesCard).join('') ||
       '<p class="muted">Aucune série ici. Une série apparaît dès que deux tomes ont le même champ « Série ».</p>');
+  } else if (coll.tab === 'authors') {
+    const list = authorGroups().filter(g => matchQ(g.name + ' ' + g.books.map(b => `${b.title} ${b.series}`).join(' '), coll.q))
+      .sort((a, b) => coll.aSort === 'date' ? b.last.localeCompare(a.last)
+        : coll.aSort === 'count' ? b.books.length - a.books.length || byTitle(a.name, b.name) : byTitle(a.name, b.name));
+    const none = books().filter(b => !splitAuthors(b.author).length).length;
+    body.innerHTML = `<p class="muted">${list.length} auteur(s)${none ? ` · ${none} document(s) sans auteur` : ''}</p>` +
+      (list.slice(0, 300).map(authorCard).join('') || '<p class="muted">Aucun auteur.</p>');
   } else {
     const who = coll.m ? [coll.m] : db.members;
     const st = (b, m) => String(readOf(b, m).read);

@@ -51,7 +51,7 @@ small { display: block; }
 .next .gaps { color: var(--no-b); font-weight: 400; }
 
 .subtabs { display: flex; gap: 0; margin-bottom: 8px; }
-.subtabs button { flex: 1; border-radius: 0; }
+.subtabs button { flex: 1; border-radius: 0; padding: 8px 4px; font-size: .9rem; }
 .subtabs button:first-child { border-radius: 10px 0 0 10px; }
 .subtabs button:last-child { border-radius: 0 10px 10px 0; }
 .subtabs button.on { background: var(--accent); color: var(--card); border-color: var(--accent); font-weight: 600; }
