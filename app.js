@@ -36,6 +36,11 @@ function cleanIsbn(s) {
   return /^\d{13}$/.test(s) ? s : '';
 }
 
+// EAN-13 valide (ISBN 978/979, ou code-barres de DVD) ; préfixe 2 = étiquettes internes, ignorées
+const eanOk = c => /^[013-9]\d{12}$/.test(c) &&
+  [...c].reduce((s, d, i) => s + +d * (i % 2 ? 3 : 1), 0) % 10 === 0;
+const isDvd = b => b?.type === 'dvd';
+
 const TOME_RE = /(?:\btome|\bt\.?|\bvol(?:ume)?\.?|n°|#)\s*(\d{1,3})\b/i;
 function guessMeta(title, author = '', cover = '') {
   title = String(title ?? '').trim();
@@ -63,7 +68,7 @@ function searchBooks(q) {
   const toks = norm(q).split(' ').filter(Boolean);
   if (!toks.length) return [];
   return books().filter(b => {
-    const words = norm(`${b.title} ${b.author} ${b.series} ${b.tome ? `t${b.tome} tome ${b.tome}` : ''}`).split(' ');
+    const words = norm(`${b.title} ${b.author} ${b.series} ${b.tome ? `t${b.tome} tome ${b.tome}` : ''} ${isDvd(b) ? 'dvd' : ''}`).split(' ');
     return toks.every(t => words.some(w => w.startsWith(t) || (t.length >= 4 && near(t, w))));
   }).sort(bySeries);
 }
@@ -75,11 +80,13 @@ function findBook({ isbn, title, tome }) {
 }
 
 async function fetchMeta(isbn) {
-  const [m, bnf] = await Promise.all([fetchMetaWeb(isbn),
+  const book = /^97[89]/.test(isbn); // sinon : DVD ou autre produit, inconnu de Google Books
+  const [m, bnf] = await Promise.all([book ? fetchMetaWeb(isbn) : null,
     bnfSearch(`bib.ean all "${isbn}" or bib.isbn all "${isbn}"`).then(r => r[0]).catch(() => null)]);
   if (!bnf) return m;
   const out = m || { title: bnf.title, author: bnf.author, cover: '', tome: '', series: '' };
   if (bnf.series) Object.assign(out, { series: bnf.series, tome: bnf.tome || out.tome });
+  out.type = bnf.dvd || !book ? 'dvd' : '';
   return out;
 }
 
@@ -114,6 +121,7 @@ async function bnfSearch(cql) {
     const f461 = fields('461')[0], au = fields('700')[0] || fields('701')[0];
     return {
       title: sub(fields('200')[0], 'a'),
+      dvd: /images anim/i.test(sub(fields('200')[0], 'b')), // « Texte imprimé » / « Images animées »
       author: [sub(au, 'a'), sub(au, 'b')].filter(Boolean).join(' '),
       series: sub(f461, 't').replace(/[\s.;:,]+$/, ''),
       tome: +(sub(f461, 'v').match(/\d+/)?.[0]) || '',
@@ -126,14 +134,17 @@ async function bnfFind(b) {
   const a = words(b.author), by = a ? ` and bib.author all "${a}"` : '';
   // Le numéro dans la requête retrouve le bon tome quand le titre est le nom de la série (« Mortelle Adèle. 14 »)
   const queries = [b.tome && `bib.title all "${words(b.title)} ${b.tome}"`, `bib.title all "${words(b.title)}"`].filter(Boolean);
-  let recs = [];
+  let recs = [], exact = [];
   for (const q of queries) {
     recs = (a ? await bnfSearch(q + by) : []);
     if (!recs.length) recs = await bnfSearch(q);
+    if (!exact.length) exact = recs.filter(r => norm(r.title) === norm(b.title));
     recs = recs.filter(r => r.series && (norm(r.title) === norm(b.title) || norm(r.series) === norm(b.title)));
     if (recs.length) break;
   }
-  if (!recs.length) return null;
+  // DVD seulement si toutes les notices au même titre sont des vidéos (un roman peut avoir son film)
+  const dvd = exact.length > 0 && exact.every(r => r.dvd);
+  if (!recs.length) return exact.length ? { series: '', tome: '', author: '', isbns: [], dvd } : null;
   const same = recs.filter(r => b.tome && r.tome === +b.tome);
   if (same.length) recs = same;
   // Tome connu mais introuvable : on garde la série, jamais le numéro ni les ISBN d'un autre tome
@@ -143,23 +154,25 @@ async function bnfFind(b) {
   const key = Object.keys(count).sort((x, y) => count[y] - count[x])[0];
   const best = recs.filter(r => norm(r.series) === key);
   return { series: best[0].series, tome: best.find(r => r.tome)?.tome || '', author: best[0].author,
-    isbns: [...new Set(best.flatMap(r => r.isbns))] };
+    isbns: [...new Set(best.flatMap(r => r.isbns))], dvd: dvd || best.every(r => r.dvd) };
 }
 
 let bnfRunning = false;
+const BNF_V = 2; // 2 : détection du support (livre / DVD) ajoutée — les documents déjà vérifiés le sont à nouveau
 async function completeSeries() {
   if (bnfRunning) return;
   if (!navigator.onLine) return alert('Connexion Internet nécessaire.');
   bnfRunning = true;
-  const todo = books().filter(b => !b.bnf);
+  const todo = books().filter(b => (b.bnf || 0) < BNF_V);
   let found = 0, i = 0;
   const show = msg => { const el = $('#bnf-st'); if (el) el.textContent = msg; };
   try {
     for (const b of todo) {
       show(`${++i} / ${todo.length} — ${found} série(s) trouvée(s)…`);
       const r = await bnfFind(b);
-      b.bnf = 1;
-      if (r) {
+      b.bnf = BNF_V;
+      if (r?.dvd && !b.type) b.type = 'dvd';
+      if (r?.series) {
         found++;
         // Ne remplace pas une série saisie à la main (seulement la série vide ou devinée depuis le titre)
         if (!b.series || norm(b.series) === norm(b.title)) b.series = r.series;
@@ -170,7 +183,7 @@ async function completeSeries() {
       save();
       await new Promise(r => setTimeout(r, 300)); // reste poli avec le serveur de la BnF
     }
-    show(`Terminé : ${found} série(s) trouvée(s) sur ${todo.length} livre(s).`);
+    show(`Terminé : ${found} série(s) trouvée(s) sur ${todo.length} document(s).`);
   } catch {
     show(`Interrompu (connexion ?) après ${i - 1} livre(s). Relancez pour continuer.`);
   }
@@ -180,6 +193,7 @@ async function completeSeries() {
 
 // ---------- Rendu ----------
 const READ = { true: '📖 Lu', false: '🚫 Pas lu', null: '❔ Lu ?' };
+const SEEN = { true: '📺 Vu', false: '🚫 Pas vu', null: '❔ Vu ?' };
 const LIKE = { true: '👍', false: '👎', null: '🤷' };
 
 const readOf = (b, m) => ({ read: null, liked: null, ...b.reads?.[m] });
@@ -193,13 +207,13 @@ function readers(b) {
   return `<div class="readers">${db.members.map(m => {
     const r = readOf(b, m);
     return `<span class="loan"><b>${esc(m)}</b>
-      <button class="chip" data-act="read" data-id="${b.id}" data-m="${esc(m)}">${READ[r.read]}</button>
+      <button class="chip" data-act="read" data-id="${b.id}" data-m="${esc(m)}">${(isDvd(b) ? SEEN : READ)[r.read]}</button>
       <button class="chip" data-act="like" data-id="${b.id}" data-m="${esc(m)}">${LIKE[r.liked]}</button></span>`;
   }).join('')}</div>`;
 }
 
 function bookInfo(b) {
-  return `<b>${esc(b.title)}</b><small>${esc(b.author)}${b.series ? ` · ${esc(b.series)}${b.tome ? ' T' + b.tome : ''}` : ''}</small>`;
+  return `<b>${isDvd(b) ? '💿 ' : ''}${esc(b.title)}</b><small>${esc(b.author)}${b.series ? ` · ${esc(b.series)}${b.tome ? ' T' + b.tome : ''}` : ''}</small>`;
 }
 
 function bookCard(b) {
@@ -228,7 +242,7 @@ async function showIsbn(isbn) {
     <small>ISBN ${isbn}${navigator.onLine ? ' — recherche des infos…' : ''}</small></div></div>`;
   const m = navigator.onLine ? await fetchMeta(isbn) : null;
   if ($('#q').value !== q) return;
-  pending = { ...(m || {}), isbn };
+  pending = { ...(m || {}), isbn, type: m?.type ?? (/^97[89]/.test(isbn) ? '' : 'dvd') };
   // Même livre, autre édition (ISBN différent) ?
   const rest = m?.tome ? m.title.slice(m.title.search(TOME_RE)).replace(TOME_RE, '').replace(/^[\s\-–:,.]+/, '') : '';
   const sims = m ? [...new Set([
@@ -300,7 +314,7 @@ function renderSeries() {
     : '<p class="muted">Aucune série. Renseignez le champ « Série » et le tome lors d\'un emprunt.</p>';
 }
 
-const hist = { m: '', k: '', r: '' };
+const hist = { m: '', k: '', r: '', t: '' };
 const opts = (o, cur) => Object.entries(o).map(([v, t]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(t)}</option>`).join('');
 function renderHistory() {
   const who = hist.m ? [hist.m] : db.members;
@@ -308,12 +322,14 @@ function renderHistory() {
   const list = books().filter(b => {
     const ls = loansOf(b.id);
     if (!ls.length || (hist.k && !ls.some(l => (hist.k === 'buy') === isBuy(l)))) return false;
+    if (hist.t && (hist.t === 'dvd') !== isDvd(b)) return false;
     if (!hist.r) return true;
     return hist.r === 'null' ? who.every(m => st(b, m) === 'null') : who.some(m => st(b, m) === hist.r);
   }).sort((a, b) => loansOf(b.id)[0].date.localeCompare(loansOf(a.id)[0].date));
   $('#v-history').innerHTML = `
     <select id="h-m" data-h="m">${opts({ '': 'Tout le monde', ...Object.fromEntries(db.members.map(m => [m, m])) }, hist.m)}</select>
     <div class="row filters">
+      <select data-h="t">${opts({ '': 'Livres et DVD', book: '📖 Livres', dvd: '💿 DVD' }, hist.t)}</select>
       <select data-h="k">${opts({ '': 'Emprunts et achats', loan: '📚 Emprunts', buy: '🛒 Achats' }, hist.k)}</select>
       <select data-h="r">${opts({ '': 'Lus ou non', true: '📖 Lus', false: '🚫 Pas lus', null: '❔ Non renseigné' }, hist.r)}</select>
     </div>
@@ -331,7 +347,7 @@ function renderSettings() {
     <p class="muted">Cherche dans le catalogue de la BnF la série et le numéro de chaque livre
       (ex. « L'or de Boavista » → Marsupilami, tome 7), ainsi que ses ISBN pour le reconnaître au scan.
       Seuls les livres pas encore vérifiés sont traités.</p>
-    <button data-act="bnf">🔎 Retrouver les séries</button> <span id="bnf-st" class="muted">${books().filter(b => !b.bnf).length} livre(s) à vérifier</span>
+    <button data-act="bnf">🔎 Retrouver les séries</button> <span id="bnf-st" class="muted">${books().filter(b => (b.bnf || 0) < BNF_V).length} document(s) à vérifier</span>
 
     ${typeof cloudHtml === 'function' ? cloudHtml() : ''}
 
@@ -345,7 +361,7 @@ function renderSettings() {
     <p class="muted">Export CSV de votre compte bibliothèque (Iguana), ou fichier avec des colonnes titre, auteur, ISBN, date.</p>
     <p><label class="btn">📄 Choisir le fichier CSV<input type="file" accept=".csv,.txt,text/csv" id="imp-csv" hidden></label></p>
 
-    <p class="muted">${books().length} livre(s) · ${db.loans.filter(l => !isBuy(l)).length} emprunt(s) · ${db.loans.filter(isBuy).length} achat(s)</p>`;
+    <p class="muted">${books().filter(b => !isDvd(b)).length} livre(s) · ${books().filter(isDvd).length} DVD · ${db.loans.filter(l => !isBuy(l)).length} emprunt(s) · ${db.loans.filter(isBuy).length} achat(s)</p>`;
 }
 
 const VIEWS = { home: renderHome, series: renderSeries, history: renderHistory, settings: renderSettings };
@@ -363,10 +379,10 @@ function go(v) {
 function openForm(book, loan = true, kind = 'loan') {
   const f = $('#bookform');
   f.reset();
-  for (const k of ['id', 'title', 'author', 'series', 'tome', 'isbn', 'cover']) f.elements[k].value = book?.[k] ?? '';
+  for (const k of ['id', 'title', 'author', 'series', 'tome', 'isbn', 'cover', 'type']) f.elements[k].value = book?.[k] ?? '';
   f.elements.date.value = today();
   f.elements.kind.value = kind;
-  $('#f-h').textContent = !loan ? 'Modifier le livre' : kind === 'buy' ? 'Nouvel achat' : 'Nouvel emprunt';
+  $('#f-h').textContent = !loan ? 'Modifier' : kind === 'buy' ? 'Nouvel achat' : 'Nouvel emprunt';
   $('#f-loan').hidden = !loan;
   $('#f-del').hidden = loan || !book?.id;
   $('#serieslist').innerHTML = [...new Set(books().map(b => b.series).filter(Boolean))].map(s => `<option value="${esc(s)}">`).join('');
@@ -380,7 +396,7 @@ $('#bookform').addEventListener('submit', e => {
   let b = db.books[v('id')] || findBook({ isbn, title: v('title'), tome: v('tome') });
   if (!b) { b = { id: uid() }; db.books[b.id] = b; }
   Object.assign(b, { title: v('title'), author: v('author'), series: v('series'), tome: v('tome') ? +v('tome') : '',
-    isbn: isbn || b.isbn || '', cover: v('cover') || b.cover || '' });
+    isbn: isbn || b.isbn || '', cover: v('cover') || b.cover || '', type: v('type') });
   if (!$('#f-loan').hidden) db.loans.push({ id: uid(), bookId: b.id, kind: f.elements.kind.value, date: v('date') || today() });
   save();
   if (view === 'home') $('#q').value = b.isbn || b.title;
@@ -412,7 +428,7 @@ async function scan() {
   $('#scan-cancel').onclick = stop;
   while (on) {
     try {
-      const c = (await det.detect(video)).find(c => /^97[89]\d{10}$/.test(c.rawValue));
+      const c = (await det.detect(video)).find(c => eanOk(c.rawValue));
       if (c) { stop(); navigator.vibrate?.(100); $('#q').value = c.rawValue; go('home'); return; }
     } catch {}
     await new Promise(r => setTimeout(r, 200));
@@ -465,10 +481,10 @@ function exportCsv() {
   const txt = (v, yes, no) => v === true ? yes : v === false ? no : '';
   const rows = [...db.loans].sort((a, b) => b.date.localeCompare(a.date)).map(l => {
     const b = db.books[l.bookId] || {};
-    return [isBuy(l) ? 'Achat' : 'Emprunt', fmt(l.date), b.title, b.author, b.series, b.tome, b.isbn,
+    return [isBuy(l) ? 'Achat' : 'Emprunt', isDvd(b) ? 'DVD' : 'Livre', fmt(l.date), b.title, b.author, b.series, b.tome, b.isbn,
       ...db.members.flatMap(m => { const r = readOf(b, m); return [txt(r.read, 'oui', 'non'), txt(r.liked, 'aimé', 'pas aimé')]; })];
   });
-  const head = ['Type', 'Date', 'Titre', 'Auteur', 'Série', 'Tome', 'ISBN', ...db.members.flatMap(m => [`${m} - lu`, `${m} - avis`])];
+  const head = ['Type', 'Support', 'Date', 'Titre', 'Auteur', 'Série', 'Tome', 'ISBN', ...db.members.flatMap(m => [`${m} - lu`, `${m} - avis`])];
   return '\uFEFF' + [head, ...rows]
     .map(r => r.map(cell).join(';')).join('\r\n');
 }
@@ -492,7 +508,7 @@ function importCsv(text) {
     if (!n(cd)) cd = -1;
   }
   // Colonnes présentes dans l'export CSV de l'appli
-  const cs = col('serie'), cn = h.indexOf('tome'), ck = h.indexOf('type');
+  const cs = col('serie'), cn = h.indexOf('tome'), ck = h.indexOf('type'), cu = h.indexOf('support');
   const rcols = raw.map((x, j) => x.match(/^(.+) - (lu|avis)$/i) && [j, ...x.match(/^(.+) - (lu|avis)$/i).slice(1)]).filter(Boolean);
   const yesNo = (v, yes, no) => norm(v) === yes ? true : norm(v) === no ? false : null;
   if (ct < 0 && ci < 0) return alert('Colonnes « titre » ou « isbn » introuvables dans la première ligne.');
@@ -503,6 +519,7 @@ function importCsv(text) {
     if (!m.title && !isbn) continue;
     if (cs >= 0 && r[cs]?.trim()) m.series = r[cs].trim();
     if (cn >= 0 && +r[cn]) m.tome = +r[cn];
+    m.type = cu >= 0 && norm(r[cu]) === 'dvd' ? 'dvd' : '';
     const date = toIso(cd >= 0 ? r[cd] : '') || today();
     let b = findBook({ isbn, title: m.title, tome: m.tome });
     if (!b) { b = { id: uid(), ...m, title: m.title || 'ISBN ' + isbn, isbn }; db.books[b.id] = b; }

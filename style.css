@@ -57,7 +57,7 @@ dialog::backdrop { background: #0008; }
 #bookform label input { margin-top: 2px; }
 .row { display: flex; gap: 8px; }
 .row label:first-child { flex: 1; }
-.tome { width: 90px; }
+.tome { width: 110px; }
 .filters { margin-top: 8px; }
 .filters select { flex: 1; }
 fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 12px 0; }

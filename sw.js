@@ -1,5 +1,5 @@
 // Hors ligne : sert les fichiers depuis le cache, et les met à jour en arrière-plan.
-const CACHE = 'biblio-v3';
+const CACHE = 'biblio-v4';
 const FILES = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'sync.js', 'firebase-config.js'];
 
 self.addEventListener('install', e => {

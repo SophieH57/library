@@ -48,7 +48,10 @@
       <label class="tome">Tome<input name="tome" type="number" min="0" inputmode="numeric"></label>
     </div>
     <datalist id="serieslist"></datalist>
-    <label>ISBN<input name="isbn" inputmode="numeric"></label>
+    <div class="row">
+      <label>ISBN / code-barres<input name="isbn" inputmode="numeric"></label>
+      <label class="tome">Support<select name="type"><option value="">📖 Livre</option><option value="dvd">💿 DVD</option></select></label>
+    </div>
     <input type="hidden" name="cover"><input type="hidden" name="id">
     <fieldset id="f-loan">
       <legend>Emprunt ou achat</legend>
