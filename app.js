@@ -9,7 +9,7 @@ function load() {
   try { return { ...structuredClone(EMPTY), ...JSON.parse(localStorage.getItem(KEY)) }; } catch { return structuredClone(EMPTY); }
 }
 // Emprunt / achat = livre + date. La lecture (lu, avis) est propre à chaque personne : book.reads[prénom].
-function save() { localStorage.setItem(KEY, JSON.stringify(db)); }
+function save() { localStorage.setItem(KEY, JSON.stringify(db)); window.onSave?.(); }
 navigator.storage?.persist?.();
 
 // ---------- Utilitaires ----------
@@ -332,6 +332,8 @@ function renderSettings() {
       (ex. « L'or de Boavista » → Marsupilami, tome 7), ainsi que ses ISBN pour le reconnaître au scan.
       Seuls les livres pas encore vérifiés sont traités.</p>
     <button data-act="bnf">🔎 Retrouver les séries</button> <span id="bnf-st" class="muted">${books().filter(b => !b.bnf).length} livre(s) à vérifier</span>
+
+    ${typeof cloudHtml === 'function' ? cloudHtml() : ''}
 
     <h2>Sauvegarde</h2>
     <p class="muted">Les données restent uniquement sur ce téléphone. Exportez-les régulièrement.</p>
