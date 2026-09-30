@@ -15,7 +15,7 @@ const bookDocs = () => {
   for (const b of Object.values(db.books)) out[b.id] = JSON.stringify({ ...b, loans: byBook[b.id] || [] });
   return out;
 };
-const metaDoc = () => JSON.stringify({ members: db.members, dropped: db.dropped });
+const metaDoc = () => JSON.stringify({ members: db.members, dropped: db.dropped, finished: db.finished });
 const saveLocal = () => localStorage.setItem(KEY, JSON.stringify(db));
 
 function cloudHtml() {
@@ -66,6 +66,7 @@ function listen(uid) {
       const d = snap.data();
       db.members = d.members || db.members;
       db.dropped = d.dropped || {};
+      db.finished = d.finished || {};
       cloud.synced._meta = metaDoc();
       saveLocal(); render();
     }

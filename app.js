@@ -2,7 +2,7 @@
 
 // ---------- Données (stockées sur le téléphone) ----------
 const KEY = 'biblio-v1';
-const EMPTY = { members: ['Moi'], books: {}, loans: [], dropped: {} };
+const EMPTY = { members: ['Moi'], books: {}, loans: [], dropped: {}, finished: {} }; // finished[série] = nombre total de tomes
 let db = load();
 
 function load() {
@@ -312,14 +312,15 @@ function collGroups() {
 
 function pills(g) {
   const have = new Set(g.books.filter(b => loansOf(b.id).length && b.tome).map(b => +b.tome));
-  const max = Math.max(0, ...have);
-  const from = max > 12 ? max - 11 : 1; // longues séries : seulement les derniers tomes
+  const max = Math.max(0, ...have), total = db.finished[g.k] || 0;
+  const end = total ? Math.max(total, max) : max + 1; // série terminée : pas de « prochain » tome
+  const from = end > 13 ? end - 12 : 1; // longues séries : seulement les derniers tomes
   let html = from > 1 ? '<span class="pill more">…</span>' : '';
-  for (let n = from; n <= max + 1; n++)
-    html += `<span class="pill ${have.has(n) ? 'on' : n > max ? 'next' : 'gap'}">${n}</span>`;
+  for (let n = from; n <= end; n++)
+    html += `<span class="pill ${have.has(n) ? 'on' : !total && n > max ? 'next' : 'gap'}">${n}</span>`;
   const gaps = [];
-  for (let n = 1; n < max; n++) if (!have.has(n)) gaps.push(n);
-  return { html, max, gaps };
+  for (let n = 1; n <= (total || max); n++) if (!have.has(n)) gaps.push(n);
+  return { html, max, gaps, total };
 }
 
 function readSummary(bs) {
@@ -345,6 +346,7 @@ function tomeRow(b) {
 
 function seriesCard(g) {
   const p = pills(g), dropped = !!db.dropped[g.k], open = coll.open.has(g.k), sum = readSummary(g.books);
+  const missing = p.gaps.length ? `<span class="gaps"> · ⚠️ Manquants : ${ranges(p.gaps)}</span>` : '';
   return `<div class="card scard ${dropped ? 'dropped' : ''}">
     <div class="info">
       <div class="shead" data-act="toggle" data-k="${esc(g.k)}">
@@ -352,9 +354,11 @@ function seriesCard(g) {
       </div>
       <div class="pills" data-act="toggle" data-k="${esc(g.k)}">${p.html}</div>
       ${dropped ? '<div class="muted">✋ Série abandonnée</div>'
-        : `<div class="next">➡️ Prochain : tome ${p.max + 1}${p.gaps.length ? `<span class="gaps"> · ⚠️ Manquants : ${ranges(p.gaps)}</span>` : ''}</div>`}
+        : p.total ? `<div class="next">🏁 Terminée (${p.total} tomes)${missing || ' · ✅ Complète'}</div>`
+        : `<div class="next">➡️ Prochain : tome ${p.max + 1}${missing}</div>`}
       ${sum ? `<small>${sum}</small>` : ''}
       ${open ? `<div class="tomes">${[...g.books].sort(bySeries).map(tomeRow).join('')}
+        <button class="chip" data-act="finish" data-k="${esc(g.k)}" data-max="${p.max}">${p.total ? '↩️ Pas terminée' : '🏁 Série terminée'}</button>
         <button class="chip" data-act="drop" data-k="${esc(g.k)}">${dropped ? '↩️ Reprendre la série' : '✋ Abandonner la série'}</button></div>` : ''}
     </div></div>`;
 }
@@ -377,7 +381,7 @@ function renderSeries() {
     </div>
     <input id="coll-q" type="search" placeholder="🔎 Filtrer…" autocomplete="off">
     <div class="row filters" id="coll-f-series">
-      <select data-c="st">${opts({ active: 'En cours', dropped: 'Abandonnées', all: 'Toutes' }, coll.st)}</select>
+      <select data-c="st">${opts({ active: 'En cours', finished: '🏁 Terminées', dropped: '✋ Abandonnées', all: 'Toutes' }, coll.st)}</select>
       <select data-c="sort">${opts({ date: 'Tri : dernier emprunt', title: 'Tri : A → Z' }, coll.sort)}</select>
     </div>
     <div id="coll-f-solo">
@@ -401,7 +405,8 @@ function renderCollBody() {
   const { series, solo } = collGroups(), body = $('#coll-body');
   const byTitle = (a, b) => norm(a).localeCompare(norm(b));
   if (coll.tab === 'series') {
-    const list = series.filter(g => (coll.st === 'all' || (coll.st === 'dropped') === !!db.dropped[g.k]) &&
+    const status = g => db.dropped[g.k] ? 'dropped' : db.finished[g.k] ? 'finished' : 'active';
+    const list = series.filter(g => (coll.st === 'all' || coll.st === status(g)) &&
       matchQ(g.name + ' ' + g.books.map(b => b.title).join(' '), coll.q))
       .sort((a, b) => coll.sort === 'title' ? byTitle(a.name, b.name) : b.last.localeCompare(a.last));
     body.innerHTML = `<p class="muted">${list.length} série(s)</p>` + (list.map(seriesCard).join('') ||
@@ -672,7 +677,16 @@ document.addEventListener('click', e => {
     case 'delloan':
       if (!confirm(`Supprimer cet ${isBuy(loan) ? 'achat' : 'emprunt'} ?`)) return;
       db.loans = db.loans.filter(l => l !== loan); break;
-    case 'drop': db.dropped[t.dataset.k] = !db.dropped[t.dataset.k]; break;
+    case 'drop': db.dropped[t.dataset.k] = !db.dropped[t.dataset.k]; delete db.finished[t.dataset.k]; break;
+    case 'finish': {
+      const k = t.dataset.k;
+      if (db.finished[k]) { delete db.finished[k]; break; }
+      const n = prompt('Série terminée. Nombre total de tomes ?', t.dataset.max);
+      if (n === null) return;
+      db.finished[k] = Math.max(1, parseInt(n) || +t.dataset.max || 1);
+      delete db.dropped[k];
+      break;
+    }
     case 'ctab': coll.tab = t.dataset.v; return renderSeries();
     case 'toggle': {
       const k = t.dataset.k;
