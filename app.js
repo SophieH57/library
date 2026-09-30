@@ -294,30 +294,129 @@ const ranges = ns => ns.reduce((a, n) => {
   return a;
 }, []).map(([a, b]) => a === b ? a : `${a}–${b}`).join(', ');
 
-function renderSeries() {
-  const groups = {};
-  for (const b of books()) if (b.series) (groups[norm(b.series)] ||= { name: b.series, books: [] }).books.push(b);
-  const rows = Object.entries(groups).map(([k, g]) => {
-    const rs = g.books.flatMap(b => db.members.map(m => readOf(b, m)));
-    const tomes = [...new Set(g.books.filter(b => loansOf(b.id).length && b.tome).map(b => +b.tome))].sort((a, b) => a - b);
-    const max = tomes.at(-1) || 0;
-    const gaps = [];
-    for (let i = 1; i < max; i++) if (!tomes.includes(i)) gaps.push(i);
-    return { k, g, tomes, max, gaps, dropped: !!db.dropped[k],
-      likes: rs.filter(r => r.liked === true).length, dislikes: rs.filter(r => r.liked === false).length,
-      unread: rs.filter(r => r.read === false).length };
-  }).sort((a, b) => a.dropped - b.dropped || norm(a.g.name).localeCompare(norm(b.g.name)));
+// ---------- Collection : séries (2 tomes ou plus) et livres seuls ----------
+const coll = { tab: 'series', q: '', st: 'active', sort: 'date', t: '', m: '', r: '', soloSort: 'date', open: new Set() };
+const lastDate = bs => bs.flatMap(b => loansOf(b.id).map(l => l.date)).sort().at(-1) || '';
+const matchQ = (text, q) => { const t = norm(text); return norm(q).split(' ').filter(Boolean).every(w => t.includes(w)); };
 
-  $('#v-series').innerHTML = rows.length ? `<ul class="list">${rows.map(r => `
-    <li class="${r.dropped ? 'dropped' : ''}">
-      <div class="name" data-act="goseries" data-s="${esc(r.g.name)}">${esc(r.g.name)}</div>
-      <small>Tomes empruntés ou achetés : ${r.tomes.length ? ranges(r.tomes) : '—'}</small>
-      ${r.dropped ? '<div class="muted">Série abandonnée</div>'
-        : `<div class="next">➡️ Prochain : tome ${r.max + 1}</div>${r.gaps.length ? `<small>Manquants : ${ranges(r.gaps)}</small>` : ''}`}
-      <small>👍 ${r.likes} · 👎 ${r.dislikes} · 🚫 ${r.unread} non lu(s)</small>
-      <button class="chip" data-act="drop" data-k="${r.k}">${r.dropped ? '↩️ Reprendre' : '✋ Abandonner'}</button>
-    </li>`).join('')}</ul>`
-    : '<p class="muted">Aucune série. Renseignez le champ « Série » et le tome lors d\'un emprunt.</p>';
+function collGroups() {
+  const groups = {}, solo = [];
+  for (const b of books()) if (b.series) (groups[norm(b.series)] ||= { name: b.series, books: [] }).books.push(b);
+  const series = [];
+  for (const [k, g] of Object.entries(groups)) {
+    if (g.books.length > 1) series.push({ k, ...g, last: lastDate(g.books) });
+    else solo.push(g.books[0]);
+  }
+  return { series, solo: solo.concat(books().filter(b => !b.series)) };
+}
+
+function pills(g) {
+  const have = new Set(g.books.filter(b => loansOf(b.id).length && b.tome).map(b => +b.tome));
+  const max = Math.max(0, ...have);
+  const from = max > 12 ? max - 11 : 1; // longues séries : seulement les derniers tomes
+  let html = from > 1 ? '<span class="pill more">…</span>' : '';
+  for (let n = from; n <= max + 1; n++)
+    html += `<span class="pill ${have.has(n) ? 'on' : n > max ? 'next' : 'gap'}">${n}</span>`;
+  const gaps = [];
+  for (let n = 1; n < max; n++) if (!have.has(n)) gaps.push(n);
+  return { html, max, gaps };
+}
+
+function readSummary(bs) {
+  return db.members.map(m => {
+    const rs = bs.map(b => readOf(b, m));
+    const read = rs.filter(r => r.read === true).length, up = rs.filter(r => r.liked === true).length,
+      down = rs.filter(r => r.liked === false).length, no = rs.filter(r => r.read === false).length;
+    if (!read && !up && !down && !no) return '';
+    return `<span class="who"><b>${esc(m)}</b> ${read ? `📖 ${read}` : ''}${no ? ` 🚫 ${no}` : ''}${up ? ` 👍 ${up}` : ''}${down ? ` 👎 ${down}` : ''}</span>`;
+  }).filter(Boolean).join(' · ');
+}
+
+function tomeRow(b) {
+  const ls = loansOf(b.id);
+  const bare = b.title.replace(TOME_RE, '').replace(/[\s.\-–:,]+$/, '');
+  return `<div class="trow">
+      <span class="tome-badge">${b.tome ? 'T' + b.tome : '?'}</span>
+      <span class="ttl">${norm(bare) === norm(b.series) ? '' : esc(b.title)}</span>
+      <small>${ls.length ? `${isBuy(ls[0]) ? '🛒' : '📚'} ${fmt(ls[0].date)}` : 'jamais emprunté'}</small>
+      <button class="chip" data-act="edit" data-id="${b.id}">✏️</button>
+    </div>${readers(b)}`;
+}
+
+function seriesCard(g) {
+  const p = pills(g), dropped = !!db.dropped[g.k], open = coll.open.has(g.k), sum = readSummary(g.books);
+  return `<div class="card scard ${dropped ? 'dropped' : ''}">
+    <div class="info">
+      <div class="shead" data-act="toggle" data-k="${esc(g.k)}">
+        <span class="series">${esc(g.name)}</span><small>${fmt(g.last)} ${open ? '▴' : '▾'}</small>
+      </div>
+      <div class="pills" data-act="toggle" data-k="${esc(g.k)}">${p.html}</div>
+      ${dropped ? '<div class="muted">✋ Série abandonnée</div>'
+        : `<div class="next">➡️ Prochain : tome ${p.max + 1}${p.gaps.length ? `<span class="gaps"> · ⚠️ Manquants : ${ranges(p.gaps)}</span>` : ''}</div>`}
+      ${sum ? `<small>${sum}</small>` : ''}
+      ${open ? `<div class="tomes">${[...g.books].sort(bySeries).map(tomeRow).join('')}
+        <button class="chip" data-act="drop" data-k="${esc(g.k)}">${dropped ? '↩️ Reprendre la série' : '✋ Abandonner la série'}</button></div>` : ''}
+    </div></div>`;
+}
+
+function soloRow(b) {
+  const ls = loansOf(b.id), key = 'b:' + b.id;
+  if (coll.open.has(key)) return `<div class="solo-open">${bookCard(b)}<button class="chip" data-act="toggle" data-k="${key}">▴ Réduire</button></div>`;
+  const sum = readSummary([b]);
+  return `<div class="card solo" data-act="toggle" data-k="${key}"><div class="info">
+      ${bookInfo(b)}
+      <small>${ls.length ? `${ls.some(l => !isBuy(l)) ? '📚' : ''}${ls.some(isBuy) ? '🛒' : ''} ${fmt(ls[0].date)}` : 'jamais emprunté'}${sum ? ' · ' + sum : ''}</small>
+    </div></div>`;
+}
+
+function renderSeries() {
+  const el = $('#v-series');
+  if (!$('#coll-q')) el.innerHTML = `
+    <div class="subtabs">
+      <button data-act="ctab" data-v="series">📚 Séries</button><button data-act="ctab" data-v="solo">📖 Livres seuls</button>
+    </div>
+    <input id="coll-q" type="search" placeholder="🔎 Filtrer…" autocomplete="off">
+    <div class="row filters" id="coll-f-series">
+      <select data-c="st">${opts({ active: 'En cours', dropped: 'Abandonnées', all: 'Toutes' }, coll.st)}</select>
+      <select data-c="sort">${opts({ date: 'Tri : dernier emprunt', title: 'Tri : A → Z' }, coll.sort)}</select>
+    </div>
+    <div id="coll-f-solo">
+      <div class="row filters">
+        <select data-c="t">${opts({ '': 'Livres et DVD', book: '📖 Livres', dvd: '💿 DVD' }, coll.t)}</select>
+        <select data-c="soloSort">${opts({ date: 'Tri : dernier emprunt', title: 'Tri : A → Z' }, coll.soloSort)}</select>
+      </div>
+      <div class="row filters">
+        <select data-c="m">${opts({ '': 'Tout le monde', ...Object.fromEntries(db.members.map(m => [m, m])) }, coll.m)}</select>
+        <select data-c="r">${opts({ '': 'Lus ou non', true: '📖 Lus', false: '🚫 Pas lus', null: '❔ Non renseigné' }, coll.r)}</select>
+      </div>
+    </div>
+    <div id="coll-body"></div>`;
+  for (const b of el.querySelectorAll('.subtabs button')) b.classList.toggle('on', b.dataset.v === coll.tab);
+  $('#coll-f-series').hidden = coll.tab !== 'series';
+  $('#coll-f-solo').hidden = coll.tab !== 'solo';
+  renderCollBody();
+}
+
+function renderCollBody() {
+  const { series, solo } = collGroups(), body = $('#coll-body');
+  const byTitle = (a, b) => norm(a).localeCompare(norm(b));
+  if (coll.tab === 'series') {
+    const list = series.filter(g => (coll.st === 'all' || (coll.st === 'dropped') === !!db.dropped[g.k]) &&
+      matchQ(g.name + ' ' + g.books.map(b => b.title).join(' '), coll.q))
+      .sort((a, b) => coll.sort === 'title' ? byTitle(a.name, b.name) : b.last.localeCompare(a.last));
+    body.innerHTML = `<p class="muted">${list.length} série(s)</p>` + (list.map(seriesCard).join('') ||
+      '<p class="muted">Aucune série ici. Une série apparaît dès que deux tomes ont le même champ « Série ».</p>');
+  } else {
+    const who = coll.m ? [coll.m] : db.members;
+    const st = (b, m) => String(readOf(b, m).read);
+    const list = solo.filter(b => (!coll.t || (coll.t === 'dvd') === isDvd(b)) &&
+      (!coll.r || (coll.r === 'null' ? who.every(m => st(b, m) === 'null') : who.some(m => st(b, m) === coll.r))) &&
+      matchQ(`${b.title} ${b.author} ${b.series}`, coll.q))
+      .sort((a, b) => coll.soloSort === 'title' ? byTitle(a.series || a.title, b.series || b.title)
+        : lastDate([b]).localeCompare(lastDate([a])));
+    body.innerHTML = `<p class="muted">${list.length} document(s)</p>` + (list.slice(0, 300).map(soloRow).join('') ||
+      '<p class="muted">Aucun document.</p>');
+  }
 }
 
 const hist = { m: '', k: '', r: '', t: '' };
@@ -574,7 +673,12 @@ document.addEventListener('click', e => {
       if (!confirm(`Supprimer cet ${isBuy(loan) ? 'achat' : 'emprunt'} ?`)) return;
       db.loans = db.loans.filter(l => l !== loan); break;
     case 'drop': db.dropped[t.dataset.k] = !db.dropped[t.dataset.k]; break;
-    case 'goseries': $('#q').value = t.dataset.s; return go('home');
+    case 'ctab': coll.tab = t.dataset.v; return renderSeries();
+    case 'toggle': {
+      const k = t.dataset.k;
+      coll.open.has(k) ? coll.open.delete(k) : coll.open.add(k);
+      return renderCollBody();
+    }
     case 'delmember':
       if (!confirm(`Retirer ${t.dataset.m} ? (son historique est conservé)`)) return;
       db.members = db.members.filter(m => m !== t.dataset.m); break;
@@ -596,6 +700,7 @@ document.addEventListener('submit', e => {
 
 document.addEventListener('change', async e => {
   const t = e.target;
+  if (t.dataset.c) { coll[t.dataset.c] = t.value; return renderCollBody(); }
   if (t.dataset.h) { hist[t.dataset.h] = t.value; render(); }
   if (!t.files?.[0]) return;
   // Les exports de bibliothèque sont souvent en Latin-1 plutôt qu'en UTF-8
@@ -615,6 +720,7 @@ document.addEventListener('change', async e => {
 });
 
 $('#q').addEventListener('input', renderHome);
+document.addEventListener('input', e => { if (e.target.id === 'coll-q') { coll.q = e.target.value; renderCollBody(); } });
 $('#scan').onclick = scan;
 render();
 
