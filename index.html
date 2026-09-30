@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mes emprunts</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<meta name="theme-color" content="#2f6f4f">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><h1>📚 Mes emprunts</h1></header>
+
+<main>
+  <section id="v-home" class="view">
+    <div class="bar">
+      <input id="q" type="search" placeholder="ISBN, titre, auteur, tome…" autocomplete="off">
+      <button id="scan" class="primary">📷 Scanner</button>
+    </div>
+    <div id="result"></div>
+  </section>
+  <section id="v-series" class="view" hidden></section>
+  <section id="v-history" class="view" hidden></section>
+  <section id="v-settings" class="view" hidden></section>
+</main>
+
+<nav>
+  <button data-view="home" class="on">🔍<span>Chercher</span></button>
+  <button data-view="series">📚<span>Séries</span></button>
+  <button data-view="history">🕓<span>Suivi</span></button>
+  <button data-view="settings">⚙️<span>Réglages</span></button>
+</nav>
+
+<dialog id="scanner">
+  <video id="video" playsinline muted></video>
+  <div class="aim"></div>
+  <button id="scan-cancel">Annuler</button>
+</dialog>
+
+<dialog id="form">
+  <form method="dialog" id="bookform">
+    <h2 id="f-h">Nouvel emprunt</h2>
+    <label>Titre<input name="title" required></label>
+    <label>Auteur<input name="author"></label>
+    <div class="row">
+      <label>Série<input name="series" list="serieslist"></label>
+      <label class="tome">Tome<input name="tome" type="number" min="0" inputmode="numeric"></label>
+    </div>
+    <datalist id="serieslist"></datalist>
+    <label>ISBN<input name="isbn" inputmode="numeric"></label>
+    <input type="hidden" name="cover"><input type="hidden" name="id">
+    <fieldset id="f-loan">
+      <legend>Emprunt ou achat</legend>
+      <div><label class="chk"><input type="radio" name="kind" value="loan">📚 Emprunt</label>
+        <label class="chk"><input type="radio" name="kind" value="buy">🛒 Achat</label></div>
+      <label>Date<input name="date" type="date"></label>
+    </fieldset>
+    <div class="actions">
+      <button type="button" id="f-del" class="danger">Supprimer</button>
+      <button value="cancel" formnovalidate>Annuler</button>
+      <button value="ok" class="primary">Enregistrer</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

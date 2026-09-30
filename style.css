@@ -1,0 +1,71 @@
+:root {
+  --bg: #f6f4ef; --card: #fff; --fg: #222; --muted: #777; --line: #e2ded5;
+  --accent: #2f6f4f; --yes: #e3f3e8; --yes-b: #3a9a5c; --no: #fbe9e7; --no-b: #c9533f;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16181a; --card: #22262a; --fg: #eee; --muted: #999; --line: #33383d;
+    --accent: #5fb58a; --yes: #1d3527; --no: #3a2220; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--fg); padding-bottom: 72px; }
+header { background: var(--accent); color: #fff; padding: 10px 16px; }
+h1 { margin: 0; font-size: 1.2rem; }
+h2 { font-size: 1.05rem; margin: 20px 0 8px; }
+main { padding: 12px 16px; max-width: 700px; margin: 0 auto; }
+button, .btn { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  border-radius: 10px; padding: 8px 12px; cursor: pointer; display: inline-block; }
+.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.danger { color: var(--no-b); margin-right: auto; }
+.big { width: 100%; padding: 12px; margin-top: 8px; }
+input, select { font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); color: var(--fg); width: 100%; }
+.bar { display: flex; gap: 8px; position: sticky; top: 0; background: var(--bg); padding: 4px 0 8px; z-index: 1; }
+.bar input { flex: 1; }
+.bar button { white-space: nowrap; }
+.muted, small { color: var(--muted); }
+small { display: block; }
+
+.card { display: flex; gap: 12px; background: var(--card); border: 1px solid var(--line); border-left: 6px solid var(--line);
+  border-radius: 12px; padding: 12px; margin: 10px 0; }
+.card.yes { border-left-color: var(--yes-b); }
+.card.no { border-left-color: var(--no-b); }
+.card img { width: 60px; height: 90px; object-fit: cover; border-radius: 4px; flex: none; }
+.card .info { flex: 1; min-width: 0; }
+.status { font-weight: 600; margin: 4px 0; }
+.yes .status { color: var(--yes-b); }
+.no .status { color: var(--no-b); }
+.loan { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 0; font-size: .92rem; }
+.readers { border-top: 1px dashed var(--line); margin: 6px 0; padding-top: 4px; }
+.readers .loan { margin-right: 10px; display: inline-flex; }
+.chip { padding: 3px 8px; border-radius: 20px; font-size: .85rem; }
+.sims { background: var(--bg); border-radius: 8px; padding: 6px 10px; margin: 8px 0; font-size: .9rem; }
+
+.list { list-style: none; padding: 0; margin: 0; }
+.list > li { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin: 8px 0; }
+.list > li.dropped { opacity: .55; }
+.list .name { font-weight: 600; cursor: pointer; }
+.next { color: var(--accent); font-weight: 600; }
+
+nav { position: fixed; bottom: 0; left: 0; right: 0; display: flex; background: var(--card); border-top: 1px solid var(--line); }
+nav button { flex: 1; border: 0; border-radius: 0; padding: 8px 0; font-size: 1.2rem; background: none; }
+nav button span { display: block; font-size: .7rem; color: var(--muted); }
+nav button.on span { color: var(--accent); font-weight: 700; }
+
+dialog { border: 0; border-radius: 14px; padding: 16px; width: min(94vw, 500px); background: var(--card); color: var(--fg); }
+dialog::backdrop { background: #0008; }
+#bookform label { display: block; margin: 8px 0; font-size: .9rem; color: var(--muted); }
+#bookform label input { margin-top: 2px; }
+.row { display: flex; gap: 8px; }
+.row label:first-child { flex: 1; }
+.tome { width: 90px; }
+.filters { margin-top: 8px; }
+.filters select { flex: 1; }
+fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 12px 0; }
+label.chk { display: inline-flex !important; align-items: center; gap: 6px; margin: 4px 12px 4px 0 !important; color: var(--fg) !important; }
+label.chk input { width: auto; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+#scanner { padding: 0; background: #000; position: relative; }
+#scanner video { width: 100%; display: block; }
+#scanner .aim { position: absolute; left: 10%; right: 10%; top: 40%; height: 20%; border: 3px solid #fff; border-radius: 10px; pointer-events: none; }
+#scanner button { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); }
