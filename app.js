@@ -474,6 +474,9 @@ function exportCsv() {
 }
 
 function importCsv(text) {
+  // Connecté mais données en ligne pas encore reçues : importer maintenant créerait des doublons
+  if (typeof cloud !== 'undefined' && cloud.user && !cloud.ready)
+    return alert('Synchronisation en cours, réessayez dans quelques secondes.');
   let rows = parseCsv(text.replace(/^﻿/, ''));
   const hi = rows.slice(0, 3).findIndex(r => r.some(x => /^(titre|title|isbn)/.test(norm(x))));
   const raw = hi >= 0 ? rows[hi].map(x => x.trim()) : [];
