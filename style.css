@@ -31,6 +31,9 @@ small { display: block; }
 .card.no { border-left-color: var(--no-b); }
 .card img { width: 60px; height: 90px; object-fit: cover; border-radius: 4px; flex: none; }
 .card .info { flex: 1; min-width: 0; }
+.series { font-weight: 700; font-size: 1.05rem; color: var(--accent); }
+.tome-badge { background: var(--accent); color: var(--card); border-radius: 6px; padding: 0 6px; font-size: .85rem; white-space: nowrap; }
+.vol { font-style: italic; }
 .status { font-weight: 600; margin: 4px 0; }
 .yes .status { color: var(--yes-b); }
 .no .status { color: var(--no-b); }

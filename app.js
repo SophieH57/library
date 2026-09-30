@@ -212,8 +212,14 @@ function readers(b) {
   }).join('')}</div>`;
 }
 
+// Série en tête (bien visible), titre du tome dessous ; titre masqué s'il répète la série (« Mortelle Adèle. 14 »)
 function bookInfo(b) {
-  return `<b>${isDvd(b) ? '💿 ' : ''}${esc(b.title)}</b><small>${esc(b.author)}${b.series ? ` · ${esc(b.series)}${b.tome ? ' T' + b.tome : ''}` : ''}</small>`;
+  const icon = isDvd(b) ? '💿 ' : '';
+  if (!b.series) return `<b>${icon}${esc(b.title)}</b><small>${esc(b.author)}</small>`;
+  const bare = b.title.replace(TOME_RE, '').replace(/[\s.\-–:,]+$/, '');
+  return `<div class="series">${icon}${esc(b.series)}${b.tome ? ` <span class="tome-badge">T${b.tome}</span>` : ''}</div>
+    ${norm(bare) === norm(b.series) ? '' : `<div class="vol">${esc(b.title)}</div>`}
+    <small>${esc(b.author)}</small>`;
 }
 
 function bookCard(b) {
