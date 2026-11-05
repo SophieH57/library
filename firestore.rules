@@ -1,9 +1,12 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Chaque compte Google ne peut lire et écrire que ses propres données (users/{uid} et en dessous)
+    // Seul le compte Google de l'utilisatrice (uid ci-dessous) peut lire et écrire, et seulement users/{son uid} et en dessous.
+    // Tout autre compte qui se connecte à l'appli est refusé (pas de consommation du quota par des inconnus).
     match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read, write: if request.auth != null
+        && request.auth.uid == uid
+        && uid == 'gQjBYAgm1vUkDfKcLxs2ktxKy1E3';
     }
   }
 }
