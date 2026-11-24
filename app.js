@@ -303,9 +303,10 @@ function pills(g) {
   const have = new Set(g.books.filter(b => loansOf(b.id).length && b.tome).map(b => +b.tome));
   const max = Math.max(0, ...have), total = db.finished[g.k] || 0;
   const end = total ? Math.max(total, max) : max + 1; // série terminée : pas de « prochain » tome
-  const from = end > 13 ? end - 12 : 1; // longues séries : seulement les derniers tomes
+  // Longues séries : carte fermée, seulement les derniers tomes (« … » ouvre la carte) ; carte ouverte, tous
+  const from = end > 13 && !coll.open.has(g.k) ? end - 12 : 1;
   const sel = coll.menu?.k === g.k ? coll.menu.n : 0;
-  let html = from > 1 ? '<span class="pill more">…</span>' : '';
+  let html = from > 1 ? `<button class="pill more" data-act="toggle" data-k="${esc(g.k)}" aria-label="Voir tous les tomes">…</button>` : '';
   for (let n = from; n <= end; n++) // un clic sur un numéro ouvre le menu du tome
     html += `<button class="pill ${have.has(n) ? 'on' : !total && n > max ? 'next' : 'gap'} ${n === sel ? 'sel' : ''}"
       data-act="tmenu" data-k="${esc(g.k)}" data-n="${n}">${n}</button>`;
