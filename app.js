@@ -297,6 +297,7 @@ const ranges = ns => ns.reduce((a, n) => {
 // ---------- Collection : séries (2 tomes ou plus) et livres seuls ----------
 const coll = { tab: 'series', q: '', st: 'active', sort: 'date', t: '', m: '', r: '', soloSort: 'date', aSort: 'title', open: new Set() };
 const lastDate = bs => bs.flatMap(b => loansOf(b.id).map(l => l.date)).sort().at(-1) || '';
+const reader = () => db.members.includes(coll.who) ? coll.who : db.members[0]; // lecteur des pastilles de tomes
 const matchQ = (text, q) => { const t = norm(text); return norm(q).split(' ').filter(Boolean).every(w => t.includes(w)); };
 
 function collGroups() {
@@ -311,15 +312,23 @@ function collGroups() {
 }
 
 function pills(g) {
+  const who = reader(), byTome = {};
+  for (const b of g.books) if (b.tome) (byTome[+b.tome] ||= []).push(b);
   const have = new Set(g.books.filter(b => loansOf(b.id).length && b.tome).map(b => +b.tome));
-  const max = Math.max(0, ...have), total = db.finished[g.k] || 0;
+  // Tome lu par le lecteur choisi : ni manquant, ni « prochain », même s'il n'a jamais été emprunté
+  const read = new Set(Object.keys(byTome).filter(n => byTome[n].every(b => readOf(b, who).read === true)).map(Number));
+  const max = Math.max(0, ...have, ...read), total = db.finished[g.k] || 0;
   const end = total ? Math.max(total, max) : max + 1; // série terminée : pas de « prochain » tome
   const from = end > 13 ? end - 12 : 1; // longues séries : seulement les derniers tomes
   let html = from > 1 ? '<span class="pill more">…</span>' : '';
-  for (let n = from; n <= end; n++)
-    html += `<span class="pill ${have.has(n) ? 'on' : !total && n > max ? 'next' : 'gap'}">${n}</span>`;
+  for (let n = from; n <= end; n++) {
+    const cls = have.has(n) ? 'on' : read.has(n) ? '' : !total && n > max ? 'next' : 'gap';
+    // Un clic sur une pastille marque le tome lu / non lu pour le lecteur choisi (même s'il n'est pas enregistré)
+    html += `<span class="pill ${cls} ${read.has(n) ? 'read' : ''}" data-act="tread"
+      data-k="${esc(g.k)}" data-n="${n}" title="${esc(who)} : lu ?">${n}</span>`;
+  }
   const gaps = [];
-  for (let n = 1; n <= (total || max); n++) if (!have.has(n)) gaps.push(n);
+  for (let n = 1; n <= (total || max); n++) if (!have.has(n) && !read.has(n)) gaps.push(n);
   return { html, max, gaps, total };
 }
 
@@ -412,6 +421,7 @@ function renderSeries() {
       <select data-c="st">${opts({ active: 'En cours', finished: '🏁 Terminées', dropped: '✋ Abandonnées', all: 'Toutes' }, coll.st)}</select>
       <select data-c="sort">${opts({ date: 'Tri : dernier emprunt', title: 'Tri : A → Z' }, coll.sort)}</select>
     </div>
+    <div class="row filters" id="coll-f-who"></div>
     <div class="row filters" id="coll-f-authors">
       <select data-c="aSort">${opts({ title: 'Tri : A → Z', date: 'Tri : dernier emprunt', count: 'Tri : nombre de livres' }, coll.aSort)}</select>
     </div>
@@ -428,6 +438,9 @@ function renderSeries() {
     <div id="coll-body"></div>`;
   for (const b of el.querySelectorAll('.subtabs button')) b.classList.toggle('on', b.dataset.v === coll.tab);
   $('#coll-f-series').hidden = coll.tab !== 'series';
+  // Choix du lecteur des pastilles (refait à chaque rendu : la liste des membres peut changer)
+  $('#coll-f-who').hidden = coll.tab !== 'series' || db.members.length < 2;
+  $('#coll-f-who').innerHTML = `<select data-c="who">${opts(Object.fromEntries(db.members.map(m => [m, `📖 Tomes lus par : ${m}`])), reader())}</select>`;
   $('#coll-f-solo').hidden = coll.tab !== 'solo';
   $('#coll-f-authors').hidden = coll.tab !== 'authors';
   renderCollBody();
@@ -542,8 +555,11 @@ $('#bookform').addEventListener('submit', e => {
   if (e.submitter?.value !== 'ok') return;
   const f = e.target, v = k => f.elements[k].value.trim();
   const isbn = cleanIsbn(v('isbn'));
-  let b = db.books[v('id')] || findBook({ isbn, title: v('title'), tome: v('tome') });
+  // Tome déjà marqué lu depuis la vue Séries (fiche minimale) : on le complète au lieu de créer un doublon
+  const stub = v('series') && v('tome') && books().find(b => b.stub && norm(b.series) === norm(v('series')) && +b.tome === +v('tome'));
+  let b = db.books[v('id')] || findBook({ isbn, title: v('title'), tome: v('tome') }) || stub;
   if (!b) { b = { id: uid() }; db.books[b.id] = b; }
+  delete b.stub;
   Object.assign(b, { title: v('title'), author: v('author'), series: v('series'), tome: v('tome') ? +v('tome') : '',
     isbn: isbn || b.isbn || '', cover: v('cover') || b.cover || '', type: v('type') });
   if (!$('#f-loan').hidden) db.loans.push({ id: uid(), bookId: b.id, kind: f.elements.kind.value, date: v('date') || today() });
@@ -688,6 +704,11 @@ function importCsv(text) {
 }
 
 // ---------- Événements ----------
+// Fiche minimale (tome marqué lu sans être enregistré) qui ne porte plus rien : supprimée
+const dropStub = b => {
+  if (b.stub && !loansOf(b.id).length && !Object.values(b.reads || {}).some(r => r.read !== null || r.liked !== null))
+    delete db.books[b.id];
+};
 const cycle = v => v === null ? true : v === true ? false : null;
 
 document.addEventListener('click', e => {
@@ -711,11 +732,32 @@ document.addEventListener('click', e => {
       const b = db.books[id], m = t.dataset.m, r = readOf(b, m), k = t.dataset.act === 'read' ? 'read' : 'liked';
       r[k] = cycle(r[k]);
       (b.reads ||= {})[m] = r;
+      dropStub(b);
       break;
     }
     case 'delloan':
       if (!confirm(`Supprimer cet ${isBuy(loan) ? 'achat' : 'emprunt'} ?`)) return;
       db.loans = db.loans.filter(l => l !== loan); break;
+    case 'tread': { // pastille d'un tome : lu ↔ pas encore renseigné
+      const who = reader(), g = collGroups().series.find(g => g.k === t.dataset.k);
+      const bs = g?.books.filter(b => +b.tome === +t.dataset.n) || [];
+      const read = !bs.every(b => readOf(b, who).read === true);
+      const label = `le tome ${t.dataset.n} de « ${g?.name} »`;
+      if (!g || !confirm(read ? `Marquer ${label} comme lu${db.members.length > 1 ? ` par ${who}` : ''} ?`
+        : `Retirer « lu » sur ${label}${db.members.length > 1 ? ` pour ${who}` : ''} ?`)) return;
+      if (!bs.length) { // tome jamais enregistré : fiche minimale (stub), complétée si on l'emprunte plus tard
+        const authors = g.books.map(b => b.author).filter(Boolean);
+        const author = authors.sort((a, b) => authors.filter(x => x === b).length - authors.filter(x => x === a).length)[0] || '';
+        const b = { id: uid(), title: `${g.name}, tome ${t.dataset.n}`, author, series: g.name, tome: +t.dataset.n,
+          isbn: '', cover: '', type: g.books[0].type || '', stub: true };
+        db.books[b.id] = b; bs.push(b);
+      }
+      for (const b of bs) {
+        (b.reads ||= {})[who] = { ...readOf(b, who), read: read || null };
+        dropStub(b);
+      }
+      break;
+    }
     case 'drop': db.dropped[t.dataset.k] = !db.dropped[t.dataset.k]; delete db.finished[t.dataset.k]; break;
     case 'finish': {
       const k = t.dataset.k;

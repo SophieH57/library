@@ -7,6 +7,7 @@
     --accent: #5fb58a; --yes: #1d3527; --no: #3a2220; }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; } /* sinon .row (display:flex) affiche les filtres masqués */
 body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--fg); padding-bottom: 72px; }
 header { background: var(--accent); color: #fff; padding: 10px 16px; }
 h1 { margin: 0; font-size: 1.2rem; }
@@ -64,6 +65,10 @@ small { display: block; }
 .pill.gap { border-color: var(--no-b); color: var(--no-b); background: var(--no); }
 .pill.next { border-style: dashed; font-weight: 700; background: var(--yes); }
 .pill.more { border: 0; }
+.pill[data-act] { position: relative; }
+.pill.read::after { content: '✓'; position: absolute; top: -6px; right: -6px; width: 15px; height: 15px; border-radius: 50%;
+  background: var(--yes-b); color: #fff; font-size: .6rem; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--card); }
 .who { white-space: nowrap; }
 .tomes { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 4px; }
 .trow { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
