@@ -39,8 +39,6 @@ small { display: block; }
 .yes .status { color: var(--yes-b); }
 .no .status { color: var(--no-b); }
 .loan { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 0; font-size: .92rem; }
-.readers { border-top: 1px dashed var(--line); margin: 6px 0; padding-top: 4px; }
-.readers .loan { margin-right: 10px; display: inline-flex; }
 .chip { padding: 3px 8px; border-radius: 20px; font-size: .85rem; }
 .sims { background: var(--bg); border-radius: 8px; padding: 6px 10px; margin: 8px 0; font-size: .9rem; }
 
@@ -58,18 +56,24 @@ small { display: block; }
 .subtabs button.on { background: var(--accent); color: var(--card); border-color: var(--accent); font-weight: 600; }
 .scard.dropped { opacity: .6; }
 .shead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; cursor: pointer; }
-.pills { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; cursor: pointer; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .pill { min-width: 26px; height: 26px; padding: 0 4px; border-radius: 13px; border: 1.5px solid var(--accent); color: var(--accent);
   display: inline-flex; align-items: center; justify-content: center; font-size: .78rem; }
 .pill.on { background: var(--accent); color: var(--card); }
 .pill.gap { border-color: var(--no-b); color: var(--no-b); background: var(--no); }
 .pill.next { border-style: dashed; font-weight: 700; background: var(--yes); }
 .pill.more { border: 0; }
-.pill[data-act] { position: relative; }
-.pill.read::after { content: '✓'; position: absolute; top: -6px; right: -6px; width: 15px; height: 15px; border-radius: 50%;
-  background: var(--yes-b); color: #fff; font-size: .6rem; font-weight: 700; display: flex; align-items: center; justify-content: center;
-  border: 1.5px solid var(--card); }
-.who { white-space: nowrap; }
+button.pill { font: inherit; font-size: .85rem; min-width: 32px; height: 32px; border-radius: 16px; padding: 0 6px; background: none; }
+button.pill.on { background: var(--accent); }
+button.pill.gap { background: var(--no); }
+button.pill.next { background: var(--yes); }
+.pill.sel { outline: 3px solid var(--fg); outline-offset: 2px; }
+.tmenu { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin: 0 0 8px; }
+.tmenu .thead { display: flex; align-items: center; gap: 6px; }
+.tmenu .thead i { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tmenu .close { margin-left: auto; }
+.tacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.tacts .chip { padding: 6px 12px; }
 .tomes { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 4px; }
 .trow { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .trow .ttl { flex: 1; font-style: italic; }

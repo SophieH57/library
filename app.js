@@ -6,7 +6,12 @@ const EMPTY = { members: ['Moi'], books: {}, loans: [], dropped: {}, finished: {
 let db = load();
 
 function load() {
-  try { return { ...structuredClone(EMPTY), ...JSON.parse(localStorage.getItem(KEY)) }; } catch { return structuredClone(EMPTY); }
+  let d;
+  try { d = { ...structuredClone(EMPTY), ...JSON.parse(localStorage.getItem(KEY)) }; } catch { d = structuredClone(EMPTY); }
+  // Ancienne version : fiches minimales (stub) créées en marquant « lu » un tome jamais emprunté. Le suivi de
+  // lecture n'existe plus : sans emprunt, elles ne servent à rien.
+  for (const b of Object.values(d.books)) if (b.stub && !d.loans.some(l => l.bookId === b.id)) delete d.books[b.id];
+  return d;
 }
 // Emprunt / achat = livre + date. La lecture (lu, avis) est propre à chaque personne : book.reads[prénom].
 function save() { localStorage.setItem(KEY, JSON.stringify(db)); window.onSave?.(); }
@@ -192,24 +197,9 @@ async function completeSeries() {
 }
 
 // ---------- Rendu ----------
-const READ = { true: '📖 Lu', false: '🚫 Pas lu', null: '❔ Lu ?' };
-const SEEN = { true: '📺 Vu', false: '🚫 Pas vu', null: '❔ Vu ?' };
-const LIKE = { true: '👍', false: '👎', null: '🤷' };
-
-const readOf = (b, m) => ({ read: null, liked: null, ...b.reads?.[m] });
-
 function loanLine(l) {
   return `<div class="loan">${isBuy(l) ? '🛒 Acheté' : '📚 Emprunté'} le ${fmt(l.date)}
     <button class="chip" data-act="delloan" data-id="${l.id}">🗑</button></div>`;
-}
-
-function readers(b) {
-  return `<div class="readers">${db.members.map(m => {
-    const r = readOf(b, m);
-    return `<span class="loan"><b>${esc(m)}</b>
-      <button class="chip" data-act="read" data-id="${b.id}" data-m="${esc(m)}">${(isDvd(b) ? SEEN : READ)[r.read]}</button>
-      <button class="chip" data-act="like" data-id="${b.id}" data-m="${esc(m)}">${LIKE[r.liked]}</button></span>`;
-  }).join('')}</div>`;
 }
 
 // Série en tête (bien visible), titre du tome dessous ; titre masqué s'il répète la série (« Mortelle Adèle. 14 »)
@@ -231,7 +221,6 @@ function bookCard(b) {
       <div class="status">${st.length ? st.join(' · ') : '❌ Jamais emprunté ni acheté'}</div>
       ${bookInfo(b)}
       ${loans.map(loanLine).join('')}
-      ${readers(b)}
       <button data-act="loan" data-id="${b.id}">+ Emprunter</button>
       <button data-act="buy" data-id="${b.id}">+ Acheté</button>
       <button data-act="edit" data-id="${b.id}">✏️</button>
@@ -295,9 +284,8 @@ const ranges = ns => ns.reduce((a, n) => {
 }, []).map(([a, b]) => a === b ? a : `${a}–${b}`).join(', ');
 
 // ---------- Collection : séries (2 tomes ou plus) et livres seuls ----------
-const coll = { tab: 'series', q: '', st: 'active', sort: 'date', t: '', m: '', r: '', soloSort: 'date', aSort: 'title', open: new Set() };
+const coll = { tab: 'series', q: '', st: 'active', sort: 'date', t: '', soloSort: 'date', aSort: 'title', open: new Set(), menu: null };
 const lastDate = bs => bs.flatMap(b => loansOf(b.id).map(l => l.date)).sort().at(-1) || '';
-const reader = () => db.members.includes(coll.who) ? coll.who : db.members[0]; // lecteur des pastilles de tomes
 const matchQ = (text, q) => { const t = norm(text); return norm(q).split(' ').filter(Boolean).every(w => t.includes(w)); };
 
 function collGroups() {
@@ -312,34 +300,33 @@ function collGroups() {
 }
 
 function pills(g) {
-  const who = reader(), byTome = {};
-  for (const b of g.books) if (b.tome) (byTome[+b.tome] ||= []).push(b);
   const have = new Set(g.books.filter(b => loansOf(b.id).length && b.tome).map(b => +b.tome));
-  // Tome lu par le lecteur choisi : ni manquant, ni « prochain », même s'il n'a jamais été emprunté
-  const read = new Set(Object.keys(byTome).filter(n => byTome[n].every(b => readOf(b, who).read === true)).map(Number));
-  const max = Math.max(0, ...have, ...read), total = db.finished[g.k] || 0;
+  const max = Math.max(0, ...have), total = db.finished[g.k] || 0;
   const end = total ? Math.max(total, max) : max + 1; // série terminée : pas de « prochain » tome
   const from = end > 13 ? end - 12 : 1; // longues séries : seulement les derniers tomes
+  const sel = coll.menu?.k === g.k ? coll.menu.n : 0;
   let html = from > 1 ? '<span class="pill more">…</span>' : '';
-  for (let n = from; n <= end; n++) {
-    const cls = have.has(n) ? 'on' : read.has(n) ? '' : !total && n > max ? 'next' : 'gap';
-    // Un clic sur une pastille marque le tome lu / non lu pour le lecteur choisi (même s'il n'est pas enregistré)
-    html += `<span class="pill ${cls} ${read.has(n) ? 'read' : ''}" data-act="tread"
-      data-k="${esc(g.k)}" data-n="${n}" title="${esc(who)} : lu ?">${n}</span>`;
-  }
+  for (let n = from; n <= end; n++) // un clic sur un numéro ouvre le menu du tome
+    html += `<button class="pill ${have.has(n) ? 'on' : !total && n > max ? 'next' : 'gap'} ${n === sel ? 'sel' : ''}"
+      data-act="tmenu" data-k="${esc(g.k)}" data-n="${n}">${n}</button>`;
   const gaps = [];
-  for (let n = 1; n <= (total || max); n++) if (!have.has(n) && !read.has(n)) gaps.push(n);
+  for (let n = 1; n <= (total || max); n++) if (!have.has(n)) gaps.push(n);
   return { html, max, gaps, total };
 }
 
-function readSummary(bs) {
-  return db.members.map(m => {
-    const rs = bs.map(b => readOf(b, m));
-    const read = rs.filter(r => r.read === true).length, up = rs.filter(r => r.liked === true).length,
-      down = rs.filter(r => r.liked === false).length, no = rs.filter(r => r.read === false).length;
-    if (!read && !up && !down && !no) return '';
-    return `<span class="who"><b>${esc(m)}</b> ${read ? `📖 ${read}` : ''}${no ? ` 🚫 ${no}` : ''}${up ? ` 👍 ${up}` : ''}${down ? ` 👎 ${down}` : ''}</span>`;
-  }).filter(Boolean).join(' · ');
+// Menu d'un tome (sous les numéros) : ses emprunts / achats, et de quoi en ajouter un
+function tomeMenu(g, n) {
+  const bs = g.books.filter(b => +b.tome === n), ls = bs.flatMap(b => loansOf(b.id));
+  const t = bs[0];
+  const bare = t ? t.title.replace(TOME_RE, '').replace(/[\s.\-–:,]+$/, '') : '';
+  const btn = (kind, label) => `<button class="chip" data-act="tadd" data-kind="${kind}" data-k="${esc(g.k)}" data-n="${n}">${label}</button>`;
+  return `<div class="tmenu">
+      <div class="thead"><b>Tome ${n}</b>${t && norm(bare) !== norm(g.name) ? ` <i>${esc(t.title)}</i>` : ''}
+        <button class="chip close" data-act="tmenu" data-k="${esc(g.k)}" data-n="${n}" aria-label="Fermer">✕</button></div>
+      ${ls.length ? ls.map(loanLine).join('') : '<div class="muted">❌ Jamais emprunté ni acheté</div>'}
+      <div class="tacts">${btn('loan', '+ Emprunter')}${btn('buy', '+ Acheté')}
+        ${t ? `<button class="chip" data-act="edit" data-id="${t.id}">✏️ Modifier</button>` : ''}</div>
+    </div>`;
 }
 
 function tomeRow(b) {
@@ -350,22 +337,22 @@ function tomeRow(b) {
       <span class="ttl">${norm(bare) === norm(b.series) ? '' : esc(b.title)}</span>
       <small>${ls.length ? `${isBuy(ls[0]) ? '🛒' : '📚'} ${fmt(ls[0].date)}` : 'jamais emprunté'}</small>
       <button class="chip" data-act="edit" data-id="${b.id}">✏️</button>
-    </div>${readers(b)}`;
+    </div>`;
 }
 
 function seriesCard(g) {
-  const p = pills(g), dropped = !!db.dropped[g.k], open = coll.open.has(g.k), sum = readSummary(g.books);
+  const p = pills(g), dropped = !!db.dropped[g.k], open = coll.open.has(g.k);
   const missing = p.gaps.length ? `<span class="gaps"> · ⚠️ Manquants : ${ranges(p.gaps)}</span>` : '';
   return `<div class="card scard ${dropped ? 'dropped' : ''}">
     <div class="info">
       <div class="shead" data-act="toggle" data-k="${esc(g.k)}">
         <span class="series">${esc(g.name)}</span><small>${fmt(g.last)} ${open ? '▴' : '▾'}</small>
       </div>
-      <div class="pills" data-act="toggle" data-k="${esc(g.k)}">${p.html}</div>
+      <div class="pills">${p.html}</div>
+      ${coll.menu?.k === g.k ? tomeMenu(g, coll.menu.n) : ''}
       ${dropped ? '<div class="muted">✋ Série abandonnée</div>'
         : p.total ? `<div class="next">🏁 Terminée (${p.total} tomes)${missing || ' · ✅ Complète'}</div>`
         : `<div class="next">➡️ Prochain : tome ${p.max + 1}${missing}</div>`}
-      ${sum ? `<small>${sum}</small>` : ''}
       ${open ? `<div class="tomes">${[...g.books].sort(bySeries).map(tomeRow).join('')}
         <button class="chip" data-act="finish" data-k="${esc(g.k)}" data-max="${p.max}">${p.total ? '↩️ Pas terminée' : '🏁 Série terminée'}</button>
         <button class="chip" data-act="drop" data-k="${esc(g.k)}">${dropped ? '↩️ Reprendre la série' : '✋ Abandonner la série'}</button></div>` : ''}
@@ -403,10 +390,9 @@ function authorCard(g) {
 function soloRow(b) {
   const ls = loansOf(b.id), key = 'b:' + b.id;
   if (coll.open.has(key)) return `<div class="solo-open">${bookCard(b)}<button class="chip" data-act="toggle" data-k="${key}">▴ Réduire</button></div>`;
-  const sum = readSummary([b]);
   return `<div class="card solo" data-act="toggle" data-k="${key}"><div class="info">
       ${bookInfo(b)}
-      <small>${ls.length ? `${ls.some(l => !isBuy(l)) ? '📚' : ''}${ls.some(isBuy) ? '🛒' : ''} ${fmt(ls[0].date)}` : 'jamais emprunté'}${sum ? ' · ' + sum : ''}</small>
+      <small>${ls.length ? `${ls.some(l => !isBuy(l)) ? '📚' : ''}${ls.some(isBuy) ? '🛒' : ''} ${fmt(ls[0].date)}` : 'jamais emprunté'}</small>
     </div></div>`;
 }
 
@@ -421,26 +407,16 @@ function renderSeries() {
       <select data-c="st">${opts({ active: 'En cours', finished: '🏁 Terminées', dropped: '✋ Abandonnées', all: 'Toutes' }, coll.st)}</select>
       <select data-c="sort">${opts({ date: 'Tri : dernier emprunt', title: 'Tri : A → Z' }, coll.sort)}</select>
     </div>
-    <div class="row filters" id="coll-f-who"></div>
     <div class="row filters" id="coll-f-authors">
       <select data-c="aSort">${opts({ title: 'Tri : A → Z', date: 'Tri : dernier emprunt', count: 'Tri : nombre de livres' }, coll.aSort)}</select>
     </div>
-    <div id="coll-f-solo">
-      <div class="row filters">
-        <select data-c="t">${opts({ '': 'Livres et DVD', book: '📖 Livres', dvd: '💿 DVD' }, coll.t)}</select>
-        <select data-c="soloSort">${opts({ date: 'Tri : dernier emprunt', title: 'Tri : A → Z' }, coll.soloSort)}</select>
-      </div>
-      <div class="row filters">
-        <select data-c="m">${opts({ '': 'Tout le monde', ...Object.fromEntries(db.members.map(m => [m, m])) }, coll.m)}</select>
-        <select data-c="r">${opts({ '': 'Lus ou non', true: '📖 Lus', false: '🚫 Pas lus', null: '❔ Non renseigné' }, coll.r)}</select>
-      </div>
+    <div class="row filters" id="coll-f-solo">
+      <select data-c="t">${opts({ '': 'Livres et DVD', book: '📖 Livres', dvd: '💿 DVD' }, coll.t)}</select>
+      <select data-c="soloSort">${opts({ date: 'Tri : dernier emprunt', title: 'Tri : A → Z' }, coll.soloSort)}</select>
     </div>
     <div id="coll-body"></div>`;
   for (const b of el.querySelectorAll('.subtabs button')) b.classList.toggle('on', b.dataset.v === coll.tab);
   $('#coll-f-series').hidden = coll.tab !== 'series';
-  // Choix du lecteur des pastilles (refait à chaque rendu : la liste des membres peut changer)
-  $('#coll-f-who').hidden = coll.tab !== 'series' || db.members.length < 2;
-  $('#coll-f-who').innerHTML = `<select data-c="who">${opts(Object.fromEntries(db.members.map(m => [m, `📖 Tomes lus par : ${m}`])), reader())}</select>`;
   $('#coll-f-solo').hidden = coll.tab !== 'solo';
   $('#coll-f-authors').hidden = coll.tab !== 'authors';
   renderCollBody();
@@ -464,10 +440,7 @@ function renderCollBody() {
     body.innerHTML = `<p class="muted">${list.length} auteur(s)${none ? ` · ${none} document(s) sans auteur` : ''}</p>` +
       (list.slice(0, 300).map(authorCard).join('') || '<p class="muted">Aucun auteur.</p>');
   } else {
-    const who = coll.m ? [coll.m] : db.members;
-    const st = (b, m) => String(readOf(b, m).read);
     const list = solo.filter(b => (!coll.t || (coll.t === 'dvd') === isDvd(b)) &&
-      (!coll.r || (coll.r === 'null' ? who.every(m => st(b, m) === 'null') : who.some(m => st(b, m) === coll.r))) &&
       matchQ(`${b.title} ${b.author} ${b.series}`, coll.q))
       .sort((a, b) => coll.soloSort === 'title' ? byTitle(a.series || a.title, b.series || b.title)
         : lastDate([b]).localeCompare(lastDate([a])));
@@ -476,24 +449,18 @@ function renderCollBody() {
   }
 }
 
-const hist = { m: '', k: '', r: '', t: '' };
+const hist = { k: '', t: '' };
 const opts = (o, cur) => Object.entries(o).map(([v, t]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(t)}</option>`).join('');
 function renderHistory() {
-  const who = hist.m ? [hist.m] : db.members;
-  const st = (b, m) => String(readOf(b, m).read);
   const list = books().filter(b => {
     const ls = loansOf(b.id);
     if (!ls.length || (hist.k && !ls.some(l => (hist.k === 'buy') === isBuy(l)))) return false;
-    if (hist.t && (hist.t === 'dvd') !== isDvd(b)) return false;
-    if (!hist.r) return true;
-    return hist.r === 'null' ? who.every(m => st(b, m) === 'null') : who.some(m => st(b, m) === hist.r);
+    return !hist.t || (hist.t === 'dvd') === isDvd(b);
   }).sort((a, b) => loansOf(b.id)[0].date.localeCompare(loansOf(a.id)[0].date));
   $('#v-history').innerHTML = `
-    <select id="h-m" data-h="m">${opts({ '': 'Tout le monde', ...Object.fromEntries(db.members.map(m => [m, m])) }, hist.m)}</select>
     <div class="row filters">
       <select data-h="t">${opts({ '': 'Livres et DVD', book: '📖 Livres', dvd: '💿 DVD' }, hist.t)}</select>
       <select data-h="k">${opts({ '': 'Emprunts et achats', loan: '📚 Emprunts', buy: '🛒 Achats' }, hist.k)}</select>
-      <select data-h="r">${opts({ '': 'Lus ou non', true: '📖 Lus', false: '🚫 Pas lus', null: '❔ Non renseigné' }, hist.r)}</select>
     </div>
     <p class="muted">${list.length} livre(s)</p>
     ${list.slice(0, 200).map(bookCard).join('')}`;
@@ -501,10 +468,6 @@ function renderHistory() {
 
 function renderSettings() {
   $('#v-settings').innerHTML = `
-    <h2>Famille</h2>
-    <ul class="list">${db.members.map(m => `<li>${esc(m)} <button class="chip" data-act="delmember" data-m="${esc(m)}">🗑</button></li>`).join('')}</ul>
-    <form id="addm" class="bar"><input name="n" placeholder="Prénom" required><button class="primary">Ajouter</button></form>
-
     <h2>Séries</h2>
     <p class="muted">Cherche dans le catalogue de la BnF la série et le numéro de chaque livre
       (ex. « L'or de Boavista » → Marsupilami, tome 7), ainsi que ses ISBN pour le reconnaître au scan.
@@ -555,11 +518,8 @@ $('#bookform').addEventListener('submit', e => {
   if (e.submitter?.value !== 'ok') return;
   const f = e.target, v = k => f.elements[k].value.trim();
   const isbn = cleanIsbn(v('isbn'));
-  // Tome déjà marqué lu depuis la vue Séries (fiche minimale) : on le complète au lieu de créer un doublon
-  const stub = v('series') && v('tome') && books().find(b => b.stub && norm(b.series) === norm(v('series')) && +b.tome === +v('tome'));
-  let b = db.books[v('id')] || findBook({ isbn, title: v('title'), tome: v('tome') }) || stub;
+  let b = db.books[v('id')] || findBook({ isbn, title: v('title'), tome: v('tome') });
   if (!b) { b = { id: uid() }; db.books[b.id] = b; }
-  delete b.stub;
   Object.assign(b, { title: v('title'), author: v('author'), series: v('series'), tome: v('tome') ? +v('tome') : '',
     isbn: isbn || b.isbn || '', cover: v('cover') || b.cover || '', type: v('type') });
   if (!$('#f-loan').hidden) db.loans.push({ id: uid(), bookId: b.id, kind: f.elements.kind.value, date: v('date') || today() });
@@ -643,13 +603,11 @@ function toIso(s) {
 // Séparateur « ; » et BOM UTF-8 : s'ouvre directement dans Excel (version française) et LibreOffice
 function exportCsv() {
   const cell = v => /[;"\n]/.test(v = String(v ?? '')) ? `"${v.replace(/"/g, '""')}"` : v;
-  const txt = (v, yes, no) => v === true ? yes : v === false ? no : '';
   const rows = [...db.loans].sort((a, b) => b.date.localeCompare(a.date)).map(l => {
     const b = db.books[l.bookId] || {};
-    return [isBuy(l) ? 'Achat' : 'Emprunt', isDvd(b) ? 'DVD' : 'Livre', fmt(l.date), b.title, b.author, b.series, b.tome, b.isbn,
-      ...db.members.flatMap(m => { const r = readOf(b, m); return [txt(r.read, 'oui', 'non'), txt(r.liked, 'aimé', 'pas aimé')]; })];
+    return [isBuy(l) ? 'Achat' : 'Emprunt', isDvd(b) ? 'DVD' : 'Livre', fmt(l.date), b.title, b.author, b.series, b.tome, b.isbn];
   });
-  const head = ['Type', 'Support', 'Date', 'Titre', 'Auteur', 'Série', 'Tome', 'ISBN', ...db.members.flatMap(m => [`${m} - lu`, `${m} - avis`])];
+  const head = ['Type', 'Support', 'Date', 'Titre', 'Auteur', 'Série', 'Tome', 'ISBN'];
   return '\uFEFF' + [head, ...rows]
     .map(r => r.map(cell).join(';')).join('\r\n');
 }
@@ -674,8 +632,6 @@ function importCsv(text) {
   }
   // Colonnes présentes dans l'export CSV de l'appli
   const cs = col('serie'), cn = h.indexOf('tome'), ck = h.indexOf('type'), cu = h.indexOf('support');
-  const rcols = raw.map((x, j) => x.match(/^(.+) - (lu|avis)$/i) && [j, ...x.match(/^(.+) - (lu|avis)$/i).slice(1)]).filter(Boolean);
-  const yesNo = (v, yes, no) => norm(v) === yes ? true : norm(v) === no ? false : null;
   if (ct < 0 && ci < 0) return alert('Colonnes « titre » ou « isbn » introuvables dans la première ligne.');
   let n = 0;
   for (const r of rows) {
@@ -689,12 +645,6 @@ function importCsv(text) {
     let b = findBook({ isbn, title: m.title, tome: m.tome });
     if (!b) { b = { id: uid(), ...m, title: m.title || 'ISBN ' + isbn, isbn }; db.books[b.id] = b; }
     const kind = ck >= 0 && norm(r[ck]) === 'achat' ? 'buy' : 'loan';
-    for (const [j, who, what] of rcols) {
-      const v = what.toLowerCase() === 'lu' ? yesNo(r[j], 'oui', 'non') : yesNo(r[j], 'aime', 'pas aime');
-      if (v === null) continue;
-      if (!db.members.includes(who)) db.members.push(who);
-      (b.reads ||= {})[who] = { ...readOf(b, who), [what.toLowerCase() === 'lu' ? 'read' : 'liked']: v };
-    }
     if (db.loans.some(l => l.bookId === b.id && l.date === date && (l.kind || 'loan') === kind)) continue;
     db.loans.push({ id: uid(), bookId: b.id, kind, date });
     n++;
@@ -704,13 +654,6 @@ function importCsv(text) {
 }
 
 // ---------- Événements ----------
-// Fiche minimale (tome marqué lu sans être enregistré) qui ne porte plus rien : supprimée
-const dropStub = b => {
-  if (b.stub && !loansOf(b.id).length && !Object.values(b.reads || {}).some(r => r.read !== null || r.liked !== null))
-    delete db.books[b.id];
-};
-const cycle = v => v === null ? true : v === true ? false : null;
-
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-act],[data-view]');
   if (!t) return;
@@ -728,35 +671,23 @@ document.addEventListener('click', e => {
     case 'edit': return openForm(db.books[id], false);
     case 'new': return openForm(pending);
     case 'newq': return openForm(guessMeta($('#q').value));
-    case 'read': case 'like': {
-      const b = db.books[id], m = t.dataset.m, r = readOf(b, m), k = t.dataset.act === 'read' ? 'read' : 'liked';
-      r[k] = cycle(r[k]);
-      (b.reads ||= {})[m] = r;
-      dropStub(b);
-      break;
-    }
     case 'delloan':
       if (!confirm(`Supprimer cet ${isBuy(loan) ? 'achat' : 'emprunt'} ?`)) return;
       db.loans = db.loans.filter(l => l !== loan); break;
-    case 'tread': { // pastille d'un tome : lu ↔ pas encore renseigné
-      const who = reader(), g = collGroups().series.find(g => g.k === t.dataset.k);
-      const bs = g?.books.filter(b => +b.tome === +t.dataset.n) || [];
-      const read = !bs.every(b => readOf(b, who).read === true);
-      const label = `le tome ${t.dataset.n} de « ${g?.name} »`;
-      if (!g || !confirm(read ? `Marquer ${label} comme lu${db.members.length > 1 ? ` par ${who}` : ''} ?`
-        : `Retirer « lu » sur ${label}${db.members.length > 1 ? ` pour ${who}` : ''} ?`)) return;
-      if (!bs.length) { // tome jamais enregistré : fiche minimale (stub), complétée si on l'emprunte plus tard
-        const authors = g.books.map(b => b.author).filter(Boolean);
-        const author = authors.sort((a, b) => authors.filter(x => x === b).length - authors.filter(x => x === a).length)[0] || '';
-        const b = { id: uid(), title: `${g.name}, tome ${t.dataset.n}`, author, series: g.name, tome: +t.dataset.n,
-          isbn: '', cover: '', type: g.books[0].type || '', stub: true };
-        db.books[b.id] = b; bs.push(b);
-      }
-      for (const b of bs) {
-        (b.reads ||= {})[who] = { ...readOf(b, who), read: read || null };
-        dropStub(b);
-      }
-      break;
+    case 'tmenu': { // numéro de tome : ouvre / ferme son menu
+      const k = t.dataset.k, n = +t.dataset.n;
+      coll.menu = coll.menu?.k === k && coll.menu.n === n ? null : { k, n };
+      return renderCollBody();
+    }
+    case 'tadd': { // emprunt / achat d'un tome depuis son menu (tome pas encore enregistré : formulaire pré-rempli)
+      const g = collGroups().series.find(g => g.k === t.dataset.k), n = +t.dataset.n;
+      if (!g) return;
+      const bs = g.books.filter(b => +b.tome === n), b = bs[0];
+      const authors = g.books.map(b => b.author).filter(Boolean);
+      const author = authors.sort((a, b) => authors.filter(x => x === b).length - authors.filter(x => x === a).length)[0] || '';
+      coll.menu = null;
+      return openForm(b || { title: `${g.name}, tome ${n}`, author, series: g.name, tome: n, type: g.books[0].type || '' },
+        true, t.dataset.kind);
     }
     case 'drop': db.dropped[t.dataset.k] = !db.dropped[t.dataset.k]; delete db.finished[t.dataset.k]; break;
     case 'finish': {
@@ -774,22 +705,11 @@ document.addEventListener('click', e => {
       coll.open.has(k) ? coll.open.delete(k) : coll.open.add(k);
       return renderCollBody();
     }
-    case 'delmember':
-      if (!confirm(`Retirer ${t.dataset.m} ? (son historique est conservé)`)) return;
-      db.members = db.members.filter(m => m !== t.dataset.m); break;
     case 'bnf': return completeSeries();
     case 'export': return download(`emprunts-${today()}.json`, JSON.stringify(db, null, 1), 'application/json');
     case 'exportcsv': return download(`emprunts-${today()}.csv`, exportCsv(), 'text/csv');
     default: return;
   }
-  save(); render();
-});
-
-document.addEventListener('submit', e => {
-  if (e.target.id !== 'addm') return;
-  e.preventDefault();
-  const n = e.target.elements.n.value.trim();
-  if (n && !db.members.includes(n)) db.members.push(n);
   save(); render();
 });
 

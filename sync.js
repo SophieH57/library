@@ -83,6 +83,11 @@ function listen(uid) {
       }
       if (ch.doc.metadata.hasPendingWrites) continue; // écho de nos propres modifications
       const { loans = [], ...book } = ch.doc.data();
+      if (book.stub && !loans.length) { // fiche minimale de l'ancienne version (voir load()) : supprimée en ligne aussi
+        cloud.synced[id] = 'stub';
+        window.onSave?.();
+        continue;
+      }
       db.books[id] = book;
       db.loans = db.loans.filter(l => l.bookId !== id).concat(loans);
       changed = true;

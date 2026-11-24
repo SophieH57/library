@@ -4,8 +4,9 @@ Application web installable (PWA) pour savoir si un livre a déjà été emprunt
 
 - Scan de l'ISBN à la caméra (Chrome Android), ou recherche par titre / auteur / tome
 - Infos du livre récupérées automatiquement (Google Books, puis Open Library)
-- Emprunts par membre de la famille, statut lu / pas lu, 👍 / 👎
-- Onglet Séries : prochain tome à emprunter, tomes manquants, séries abandonnées
+- Emprunts et achats, avec leur date
+- Onglet Séries : prochain tome à emprunter, tomes manquants, séries abandonnées ;
+  un clic sur un numéro de tome ouvre son menu (emprunts, + Emprunté, + Acheté)
 - Fonctionne hors ligne ; les données restent sur le téléphone (export / restauration en JSON)
 - Import CSV de l'historique de la bibliothèque (colonnes titre, auteur, ISBN, date)
 
